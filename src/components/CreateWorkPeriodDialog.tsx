@@ -18,9 +18,12 @@ const formSchema = z.object({
   name: z.string().min(1, { message: 'Name is required' }),
   startDate: z.date({ required_error: 'Start date is required' }),
   endDate: z.date({ required_error: 'End date is required' })
+    .refine(date => date instanceof Date, { message: 'End date must be a valid date' })
     .refine((date, ctx) => {
-      const startDate = ctx.data?.startDate;
-      return startDate ? date >= startDate : true;
+      if (ctx.data?.startDate && date < ctx.data.startDate) {
+        return false;
+      }
+      return true;
     }, { message: 'End date must be after start date' }),
   neededCapacity: z.number().min(1, { message: 'Capacity must be at least 1' }),
 });
@@ -45,8 +48,7 @@ const CreateWorkPeriodDialog: React.FC<CreateWorkPeriodProps> = ({ open, onOpenC
       name: values.name,
       startDate: values.startDate,
       endDate: values.endDate,
-      neededCapacity: values.neededCapacity,
-      users: []
+      neededCapacity: values.neededCapacity
     });
     
     form.reset();
