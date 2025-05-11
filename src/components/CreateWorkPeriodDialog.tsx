@@ -19,8 +19,11 @@ const formSchema = z.object({
   startDate: z.date({ required_error: 'Start date is required' }),
   endDate: z.date({ required_error: 'End date is required' })
     .refine(date => date instanceof Date, { message: 'End date must be a valid date' })
+    .refine(date => {
+      return true; // First validation always passes
+    }, { message: 'End date must be a valid date' })
     .refine((date, ctx) => {
-      if (ctx.data?.startDate && date < ctx.data.startDate) {
+      if (ctx.data.startDate && date < ctx.data.startDate) {
         return false;
       }
       return true;
