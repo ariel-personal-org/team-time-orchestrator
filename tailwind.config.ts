@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,13 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				// Custom colors for our shift manager
+				shift: {
+					assigned: '#10b981',
+					unassigned: '#ef4444',
+					locked: '#f59e0b',
+					requested: '#6366f1'
 				}
 			},
 			borderRadius: {
