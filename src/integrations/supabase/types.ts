@@ -36,6 +36,50 @@ export type Database = {
         }
         Relationships: []
       }
+      shifts: {
+        Row: {
+          assigned: boolean
+          created_at: string
+          id: string
+          locked: boolean
+          requested_off: boolean
+          shift_date: string
+          updated_at: string
+          user_id: string
+          work_period_id: string
+        }
+        Insert: {
+          assigned?: boolean
+          created_at?: string
+          id?: string
+          locked?: boolean
+          requested_off?: boolean
+          shift_date: string
+          updated_at?: string
+          user_id: string
+          work_period_id: string
+        }
+        Update: {
+          assigned?: boolean
+          created_at?: string
+          id?: string
+          locked?: boolean
+          requested_off?: boolean
+          shift_date?: string
+          updated_at?: string
+          user_id?: string
+          work_period_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shifts_work_period_id_fkey"
+            columns: ["work_period_id"]
+            isOneToOne: false
+            referencedRelation: "work_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -54,6 +98,65 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      work_period_assignments: {
+        Row: {
+          created_at: string
+          id: string
+          user_id: string
+          work_period_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          user_id: string
+          work_period_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          user_id?: string
+          work_period_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_period_assignments_work_period_id_fkey"
+            columns: ["work_period_id"]
+            isOneToOne: false
+            referencedRelation: "work_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_periods: {
+        Row: {
+          created_at: string
+          end_date: string
+          id: string
+          name: string
+          needed_capacity: number
+          start_date: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          id?: string
+          name: string
+          needed_capacity?: number
+          start_date: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          id?: string
+          name?: string
+          needed_capacity?: number
+          start_date?: string
+          updated_at?: string
         }
         Relationships: []
       }

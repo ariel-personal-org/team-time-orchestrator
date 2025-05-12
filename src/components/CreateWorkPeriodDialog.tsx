@@ -17,24 +17,19 @@ import { WorkPeriod } from './WorkPeriodList';
 const formSchema = z.object({
   name: z.string().min(1, { message: 'Name is required' }),
   startDate: z.date({ required_error: 'Start date is required' }),
-  endDate: z.date({ required_error: 'End date is required' })
-    .refine(date => date instanceof Date, { message: 'End date must be a valid date' })
-    .refine(date => {
-      return true; // First validation always passes
-    }, { message: 'End date must be a valid date' })
-    .refine((date, ctx) => {
-      if (ctx.data.startDate && date < ctx.data.startDate) {
-        return false;
-      }
-      return true;
-    }, { message: 'End date must be after start date' }),
+  endDate: z.date({ required_error: 'End date is required' }),
   neededCapacity: z.number().min(1, { message: 'Capacity must be at least 1' }),
+}).refine((data) => {
+  return data.endDate >= data.startDate;
+}, {
+  message: "End date must be after start date",
+  path: ["endDate"]
 });
 
 type CreateWorkPeriodProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (data: Omit<WorkPeriod, 'id' | 'users'>) => void;
+  onSubmit: (data: Omit<WorkPeriod, 'id'>) => void;
 };
 
 const CreateWorkPeriodDialog: React.FC<CreateWorkPeriodProps> = ({ open, onOpenChange, onSubmit }) => {
@@ -49,9 +44,9 @@ const CreateWorkPeriodDialog: React.FC<CreateWorkPeriodProps> = ({ open, onOpenC
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit({
       name: values.name,
-      startDate: values.startDate,
-      endDate: values.endDate,
-      neededCapacity: values.neededCapacity
+      start_date: values.startDate.toISOString(),
+      end_date: values.endDate.toISOString(),
+      needed_capacity: values.neededCapacity
     });
     
     form.reset();
