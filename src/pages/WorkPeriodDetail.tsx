@@ -8,11 +8,23 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Lock } from 'lucide-react';
+import { Lock, UserPlus, UserMinus, Users, CheckCircle, XCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/providers/AuthProvider';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Input } from '@/components/ui/input';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 
 // Type for our cell data in the schedule
 type CellData = {
@@ -46,9 +58,12 @@ const WorkPeriodDetail = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [scheduleGrid, setScheduleGrid] = useState<Record<string, Record<string, CellData>>>({});
-
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedTab, setSelectedTab] = useState('schedule');
+  
   // Fetch work period details
   const { data: workPeriod, isLoading: isLoadingWorkPeriod, error: workPeriodError } = useQuery({
     queryKey: ['workPeriod', id],
@@ -67,7 +82,7 @@ const WorkPeriodDetail = () => {
   });
 
   // Fetch users assigned to this work period
-  const { data: assignedUsers, isLoading: isLoadingUsers } = useQuery({
+  const { data: assignedUsers, isLoading: isLoadingUsers, refetch: refetchAssignedUsers } = useQuery({
     queryKey: ['workPeriodUsers', id],
     queryFn: async () => {
       if (!id) throw new Error('Work period ID is required');
@@ -97,6 +112,20 @@ const WorkPeriodDetail = () => {
     }
   });
 
+  // Fetch all users for the user management dialog
+  const { data: allUsers, isLoading: isLoadingAllUsers } = useQuery({
+    queryKey: ['allUsers'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name');
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: isUserDialogOpen && isAdmin
+  });
+
   // Fetch shifts for this work period
   const { data: shifts, isLoading: isLoadingShifts } = useQuery({
     queryKey: ['workPeriodShifts', id],
@@ -114,6 +143,73 @@ const WorkPeriodDetail = () => {
     enabled: !!id
   });
 
+  // Mutation for adding a user to a work period
+  const addUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const { data, error } = await supabase
+        .from('work_period_assignments')
+        .insert([{ work_period_id: id!, user_id: userId }])
+        .select();
+      
+      if (error) throw error;
+      return data[0];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workPeriodUsers', id] });
+      toast({
+        title: 'User added',
+        description: 'User has been added to the work period.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error adding user',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
+  // Mutation for removing a user from a work period
+  const removeUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      // Delete both assignment and shifts for this user in this work period
+      const { error: assignmentError } = await supabase
+        .from('work_period_assignments')
+        .delete()
+        .eq('work_period_id', id!)
+        .eq('user_id', userId);
+      
+      if (assignmentError) throw assignmentError;
+      
+      // Also delete shifts for this user in this work period
+      const { error: shiftsError } = await supabase
+        .from('shifts')
+        .delete()
+        .eq('work_period_id', id!)
+        .eq('user_id', userId);
+      
+      if (shiftsError) throw shiftsError;
+      
+      return userId;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workPeriodUsers', id] });
+      queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
+      toast({
+        title: 'User removed',
+        description: 'User has been removed from the work period.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error removing user',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
   // Mutation for updating a shift
   const updateShiftMutation = useMutation({
     mutationFn: async ({ shiftId, updates }: { shiftId: string, updates: Partial<ShiftRecord> }) => {
@@ -124,7 +220,7 @@ const WorkPeriodDetail = () => {
         .select();
       
       if (error) throw error;
-      return data[0];
+      return data[0] as ShiftRecord;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
@@ -147,7 +243,7 @@ const WorkPeriodDetail = () => {
         .select();
       
       if (error) throw error;
-      return data[0];
+      return data[0] as ShiftRecord;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
@@ -155,6 +251,63 @@ const WorkPeriodDetail = () => {
     onError: (error) => {
       toast({
         title: 'Error creating shift',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
+  // Mutation for assigning a user to a shift row
+  const assignUserToShiftMutation = useMutation({
+    mutationFn: async ({ dateKey, capacityIndex, userId }: { dateKey: string, capacityIndex: number, userId: string }) => {
+      // First check if there's already a shift for this user on this date
+      const { data: existingShifts, error: fetchError } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('work_period_id', id!)
+        .eq('user_id', userId)
+        .eq('shift_date', dateKey);
+        
+      if (fetchError) throw fetchError;
+      
+      // If a shift exists for this user on this date, update it
+      if (existingShifts && existingShifts.length > 0) {
+        const { data, error } = await supabase
+          .from('shifts')
+          .update({ assigned: true })
+          .eq('id', existingShifts[0].id)
+          .select();
+          
+        if (error) throw error;
+        return data[0] as ShiftRecord;
+      }
+      
+      // Otherwise create a new shift
+      const { data, error } = await supabase
+        .from('shifts')
+        .insert([{
+          work_period_id: id!,
+          user_id: userId,
+          shift_date: dateKey,
+          assigned: true,
+          locked: false,
+          requested_off: false
+        }])
+        .select();
+        
+      if (error) throw error;
+      return data[0] as ShiftRecord;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
+      toast({
+        title: 'User assigned',
+        description: 'User has been assigned to the shift.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error assigning user',
         description: error.message,
         variant: 'destructive'
       });
@@ -437,6 +590,33 @@ const WorkPeriodDetail = () => {
     return dates;
   };
 
+  const handleAddUser = (userId: string) => {
+    addUserMutation.mutate(userId);
+  };
+
+  const handleRemoveUser = (userId: string) => {
+    removeUserMutation.mutate(userId);
+  };
+
+  const handleAssignUserToShift = (dateKey: string, capacityIndex: number, userId: string) => {
+    assignUserToShiftMutation.mutate({ dateKey, capacityIndex, userId });
+  };
+
+  const getUserDisplayName = (user: UserProfile) => {
+    if (user.first_name || user.last_name) {
+      return `${user.first_name || ''} ${user.last_name || ''}`.trim();
+    }
+    return user.id;
+  };
+
+  // Get users assigned to a specific date
+  const getUsersAssignedToDate = (dateKey: string): string[] => {
+    if (!shifts) return [];
+    return shifts
+      .filter(shift => shift.shift_date === dateKey && shift.assigned)
+      .map(shift => shift.user_id);
+  };
+
   // Loading state
   if (isLoadingWorkPeriod || isLoadingUsers || isLoadingShifts) {
     return (
@@ -449,17 +629,9 @@ const WorkPeriodDetail = () => {
             </div>
             <Skeleton className="h-10 w-28" />
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
+          <div className="flex flex-wrap gap-4 mb-6">
             {[1, 2, 3, 4].map(i => (
-              <Card key={i}>
-                <CardHeader className="pb-2">
-                  <Skeleton className="h-5 w-32" />
-                </CardHeader>
-                <CardContent>
-                  <Skeleton className="h-8 w-12 mb-1" />
-                  <Skeleton className="h-4 w-24" />
-                </CardContent>
-              </Card>
+              <Skeleton key={i} className="h-24 w-[calc(25%-1rem)]" />
             ))}
           </div>
           <Skeleton className="h-[400px] w-full" />
@@ -507,13 +679,11 @@ const WorkPeriodDetail = () => {
   }
 
   const dates = getDates();
-  
-  const getUserDisplayName = (user: UserProfile) => {
-    if (user.first_name || user.last_name) {
-      return `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    }
-    return user.email || user.id;
-  };
+  const filteredUsers = allUsers ? allUsers.filter(user => 
+    (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    user.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.id.toLowerCase().includes(searchTerm.toLowerCase()))
+  ) : [];
   
   return (
     <Layout>
@@ -530,42 +700,43 @@ const WorkPeriodDetail = () => {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-          <Card>
-            <CardHeader className="pb-2">
+        {/* More compact stats display */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <Card className="shadow-sm">
+            <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium">Needed Capacity</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold">{workPeriod.needed_capacity}</div>
               <p className="text-xs text-muted-foreground">Users per shift</p>
             </CardContent>
           </Card>
           
-          <Card>
-            <CardHeader className="pb-2">
+          <Card className="shadow-sm">
+            <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium">Users Assigned</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold">{assignedUsers.length}</div>
               <p className="text-xs text-muted-foreground">Total users</p>
             </CardContent>
           </Card>
           
-          <Card>
-            <CardHeader className="pb-2">
+          <Card className="shadow-sm">
+            <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium">Total Shifts</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold">{dates.length}</div>
               <p className="text-xs text-muted-foreground">Days in period</p>
             </CardContent>
           </Card>
           
-          <Card>
-            <CardHeader className="pb-2">
+          <Card className="shadow-sm">
+            <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium">Days-Off Requests</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold">
                 {shifts ? shifts.filter(shift => shift.requested_off).length : 0}
               </div>
@@ -574,10 +745,13 @@ const WorkPeriodDetail = () => {
           </Card>
         </div>
 
-        <Tabs defaultValue="schedule" className="mb-6">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-6">
           <TabsList>
             <TabsTrigger value="schedule">Schedule</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="users">
+              Users
+              <Badge variant="secondary" className="ml-2">{assignedUsers.length}</Badge>
+            </TabsTrigger>
             <TabsTrigger value="requests">Day-Off Requests</TabsTrigger>
           </TabsList>
           
@@ -611,7 +785,9 @@ const WorkPeriodDetail = () => {
               <table className="w-full border-collapse">
                 <thead>
                   <tr>
-                    <th className="border bg-muted px-4 py-2 text-left">User</th>
+                    <th className="border bg-muted px-4 py-2 text-left min-w-[180px]">
+                      <div className="font-medium">Shift Position</div>
+                    </th>
                     {dates.map((date) => (
                       <th key={date.toString()} className="border bg-muted px-4 py-2 text-center" style={{ minWidth: '100px' }}>
                         <div>{format(date, 'EEE')}</div>
@@ -621,41 +797,53 @@ const WorkPeriodDetail = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {assignedUsers.map((user) => {
+                  {/* Create rows based on needed capacity */}
+                  {[...Array(workPeriod.needed_capacity)].map((_, posIndex) => {
                     return (
-                      <tr key={user.id}>
-                        <td className="border px-4 py-2">{getUserDisplayName(user)}</td>
+                      <tr key={`position-${posIndex}`}>
+                        <td className="border px-4 py-2 bg-gray-50 font-medium">
+                          Position {posIndex + 1}
+                        </td>
                         {dates.map((date) => {
                           const dateKey = format(date, 'yyyy-MM-dd');
-                          const cellData = scheduleGrid[user.id]?.[dateKey] || { assigned: false, locked: false, requested_off: false };
+                          const assignedUsers = getUsersAssignedToDate(dateKey);
+                          const userForThisPosition = assignedUsers[posIndex];
                           
-                          // Determine cell background color
-                          let bgColor = 'bg-gray-200'; // Default unassigned
-                          
-                          if (cellData.assigned) {
-                            bgColor = 'bg-green-200';
-                          }
-                          
-                          if (cellData.requested_off) {
-                            bgColor = 'bg-red-200';
-                          }
+                          // Find the user object if assigned
+                          const assignedUser = userForThisPosition ? 
+                            assignedUsers?.find(u => u.id === userForThisPosition) : 
+                            null;
                           
                           return (
-                            <td 
-                              key={dateKey} 
-                              className={`border px-1 py-1 text-center relative cursor-pointer ${bgColor}`}
-                              onClick={() => toggleAssignment(user.id, dateKey)}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                toggleLock(user.id, dateKey);
-                              }}
-                            >
-                              <div className="flex justify-center items-center h-10">
-                                {cellData.assigned ? 'Working' : 'Off'}
-                                {cellData.locked && (
-                                  <Lock className="absolute top-1 right-1 w-3 h-3" />
-                                )}
-                              </div>
+                            <td key={dateKey} className="border px-1 py-1 text-center relative">
+                              {isAdmin ? (
+                                <select
+                                  className="w-full h-10 px-2 py-1 text-sm border-0 focus:ring-0"
+                                  value={userForThisPosition || ""}
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      handleAssignUserToShift(dateKey, posIndex, e.target.value);
+                                    }
+                                  }}
+                                >
+                                  <option value="">Assign user</option>
+                                  {assignedUsers.map((user) => (
+                                    <option 
+                                      key={user.id} 
+                                      value={user.id}
+                                      disabled={assignedUsers.includes(user.id) && user.id !== userForThisPosition}
+                                    >
+                                      {getUserDisplayName(user)}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <div className="flex justify-center items-center h-10">
+                                  {userForThisPosition ? 
+                                    getUserDisplayName(assignedUser as UserProfile) : 
+                                    'Unassigned'}
+                                </div>
+                              )}
                             </td>
                           );
                         })}
@@ -667,23 +855,216 @@ const WorkPeriodDetail = () => {
             </div>
             
             <p className="mt-4 text-sm text-muted-foreground">
-              {isAdmin ? 'Right-click to lock/unlock a cell. Locked cells will not be modified by the optimizer.' : ''}
+              {isAdmin ? 'Select users from the dropdown to assign them to shifts.' : 
+               'Contact an administrator to request changes to your schedule.'}
             </p>
           </TabsContent>
           
-          <TabsContent value="users">
-            <div className="bg-yellow-50 border border-yellow-200 p-4 rounded">
-              <p>User management would be implemented here. This would allow adding or removing users from this work period.</p>
+          <TabsContent value="users" className="mt-6">
+            {isAdmin && (
+              <div className="mb-4 flex justify-end">
+                <Button 
+                  onClick={() => setIsUserDialogOpen(true)}
+                  className="flex items-center"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" /> Add Users
+                </Button>
+              </div>
+            )}
+            
+            <div className="bg-white rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Name</TableHead>
+                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assignedUsers.length > 0 ? (
+                    assignedUsers.map(user => (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div className="flex items-center">
+                            <Avatar className="h-8 w-8 mr-2">
+                              <AvatarFallback>{(user.first_name?.[0] || '') + (user.last_name?.[0] || '')}</AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm">{user.id}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>{getUserDisplayName(user)}</TableCell>
+                        {isAdmin && (
+                          <TableCell className="text-right">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleRemoveUser(user.id)}
+                              className="h-8 px-2 text-red-600 hover:text-red-800 hover:bg-red-50"
+                            >
+                              <UserMinus className="w-4 h-4 mr-1" /> Remove
+                            </Button>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={isAdmin ? 3 : 2} className="text-center py-4 text-muted-foreground">
+                        No users assigned to this work period.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </TabsContent>
           
           <TabsContent value="requests">
-            <div className="bg-yellow-50 border border-yellow-200 p-4 rounded">
-              <p>Day-off requests management would be implemented here. This would allow reviewing and approving/rejecting day-off requests.</p>
+            <div className="bg-white rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Requested On</TableHead>
+                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shifts && shifts.filter(shift => shift.requested_off).length > 0 ? (
+                    shifts.filter(shift => shift.requested_off).map(shift => {
+                      const user = assignedUsers.find(u => u.id === shift.user_id);
+                      return (
+                        <TableRow key={shift.id}>
+                          <TableCell>
+                            <div className="flex items-center">
+                              <Avatar className="h-8 w-8 mr-2">
+                                <AvatarFallback>{user ? (user.first_name?.[0] || '') + (user.last_name?.[0] || '') : 'U'}</AvatarFallback>
+                              </Avatar>
+                              <span>{user ? getUserDisplayName(user) : shift.user_id}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{format(new Date(shift.shift_date), 'MMM d, yyyy')}</TableCell>
+                          <TableCell>{format(new Date(shift.created_at), 'MMM d, yyyy')}</TableCell>
+                          {isAdmin && (
+                            <TableCell className="text-right space-x-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
+                                  updateShiftMutation.mutate({
+                                    shiftId: shift.id,
+                                    updates: { requested_off: false, assigned: false }
+                                  });
+                                }}
+                                className="h-8 px-3 text-green-600"
+                              >
+                                <CheckCircle className="w-4 h-4 mr-1" /> Approve
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => {
+                                  updateShiftMutation.mutate({
+                                    shiftId: shift.id,
+                                    updates: { requested_off: false }
+                                  });
+                                }}
+                                className="h-8 px-3 text-red-600"
+                              >
+                                <XCircle className="w-4 h-4 mr-1" /> Deny
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={isAdmin ? 4 : 3} className="text-center py-4 text-muted-foreground">
+                        No day-off requests for this work period.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* User management dialog */}
+      <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Users to Work Period</DialogTitle>
+            <DialogDescription>
+              Select users to add to this work period. They will be available for shift assignments.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="my-4">
+            <Input
+              placeholder="Search users..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="mb-4"
+            />
+            
+            <div className="max-h-[300px] overflow-y-auto border rounded-md">
+              {isLoadingAllUsers ? (
+                <div className="p-4 text-center">Loading users...</div>
+              ) : filteredUsers.length > 0 ? (
+                <Table>
+                  <TableBody>
+                    {filteredUsers.map(user => {
+                      const isAssigned = assignedUsers?.some(au => au.id === user.id);
+                      return (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <div className="flex items-center">
+                              <Avatar className="h-8 w-8 mr-2">
+                                <AvatarFallback>{(user.first_name?.[0] || '') + (user.last_name?.[0] || '')}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div>{getUserDisplayName(user)}</div>
+                                <div className="text-xs text-muted-foreground">{user.id}</div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isAssigned ? (
+                              <Badge variant="secondary" className="bg-gray-100">Assigned</Badge>
+                            ) : (
+                              <Button 
+                                size="sm" 
+                                onClick={() => {
+                                  handleAddUser(user.id);
+                                }}
+                              >
+                                Add
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="p-4 text-center text-muted-foreground">
+                  No users found matching "{searchTerm}"
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsUserDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 };
