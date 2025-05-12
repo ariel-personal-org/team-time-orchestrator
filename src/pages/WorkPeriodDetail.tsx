@@ -43,6 +43,8 @@ type ShiftRecord = {
   assigned: boolean;
   locked: boolean;
   requested_off: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 // Type for a user profile
@@ -590,6 +592,20 @@ const WorkPeriodDetail = () => {
     return dates;
   };
 
+  // Get count of assigned users for a date
+  const getAssignedCountForDate = (dateKey: string) => {
+    if (!assignedUsers || !scheduleGrid) return 0;
+    
+    let count = 0;
+    assignedUsers.forEach(user => {
+      if (scheduleGrid[user.id]?.[dateKey]?.assigned) {
+        count++;
+      }
+    });
+    
+    return count;
+  };
+
   const handleAddUser = (userId: string) => {
     addUserMutation.mutate(userId);
   };
@@ -756,108 +772,127 @@ const WorkPeriodDetail = () => {
           </TabsList>
           
           <TabsContent value="schedule" className="mt-6">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center">
-                  <div className="w-4 h-4 bg-green-200 rounded mr-1"></div>
-                  <span className="text-sm">Assigned</span>
-                </div>
-                <div className="flex items-center">
-                  <div className="w-4 h-4 bg-gray-200 rounded mr-1"></div>
-                  <span className="text-sm">Unassigned</span>
-                </div>
-                <div className="flex items-center">
-                  <div className="w-4 h-4 bg-red-200 rounded mr-1"></div>
-                  <span className="text-sm">Day-off Requested</span>
-                </div>
-                <div className="flex items-center">
-                  <Lock className="w-4 h-4 mr-1" />
-                  <span className="text-sm">Locked</span>
-                </div>
+            {assignedUsers.length === 0 ? (
+              <div className="py-8 text-center">
+                <p className="text-muted-foreground mb-4">No users assigned to this work period yet.</p>
+                {isAdmin && (
+                  <Button onClick={() => setIsUserDialogOpen(true)}>Add Users</Button>
+                )}
               </div>
-              
-              {isAdmin && (
-                <Button onClick={runOptimizer}>Optimize Schedule</Button>
-              )}
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className="border bg-muted px-4 py-2 text-left min-w-[180px]">
-                      <div className="font-medium">Shift Position</div>
-                    </th>
-                    {dates.map((date) => (
-                      <th key={date.toString()} className="border bg-muted px-4 py-2 text-center" style={{ minWidth: '100px' }}>
-                        <div>{format(date, 'EEE')}</div>
-                        <div className="text-xs">{format(date, 'MMM d')}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Create rows based on needed capacity */}
-                  {[...Array(workPeriod.needed_capacity)].map((_, posIndex) => {
-                    return (
-                      <tr key={`position-${posIndex}`}>
-                        <td className="border px-4 py-2 bg-gray-50 font-medium">
-                          Position {posIndex + 1}
-                        </td>
-                        {dates.map((date) => {
-                          const dateKey = format(date, 'yyyy-MM-dd');
-                          const assignedUsers = getUsersAssignedToDate(dateKey);
-                          const userForThisPosition = assignedUsers[posIndex];
-                          
-                          // Find the user object if assigned
-                          const assignedUser = userForThisPosition ? 
-                            assignedUsers?.find(u => u.id === userForThisPosition) : 
-                            null;
-                          
-                          return (
-                            <td key={dateKey} className="border px-1 py-1 text-center relative">
-                              {isAdmin ? (
-                                <select
-                                  className="w-full h-10 px-2 py-1 text-sm border-0 focus:ring-0"
-                                  value={userForThisPosition || ""}
-                                  onChange={(e) => {
-                                    if (e.target.value) {
-                                      handleAssignUserToShift(dateKey, posIndex, e.target.value);
-                                    }
-                                  }}
-                                >
-                                  <option value="">Assign user</option>
-                                  {assignedUsers.map((user) => (
-                                    <option 
-                                      key={user.id} 
-                                      value={user.id}
-                                      disabled={assignedUsers.includes(user.id) && user.id !== userForThisPosition}
-                                    >
-                                      {getUserDisplayName(user)}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <div className="flex justify-center items-center h-10">
-                                  {userForThisPosition ? 
-                                    getUserDisplayName(assignedUser as UserProfile) : 
-                                    'Unassigned'}
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
+            ) : (
+              <>
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 bg-green-200 rounded mr-1"></div>
+                      <span className="text-sm">Assigned</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 bg-gray-200 rounded mr-1"></div>
+                      <span className="text-sm">Unassigned</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 bg-red-200 rounded mr-1"></div>
+                      <span className="text-sm">Day-off Requested</span>
+                    </div>
+                    <div className="flex items-center">
+                      <Lock className="w-4 h-4 mr-1" />
+                      <span className="text-sm">Locked</span>
+                    </div>
+                  </div>
+                  
+                  {isAdmin && (
+                    <Button onClick={runOptimizer}>Optimize Schedule</Button>
+                  )}
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="border bg-muted px-4 py-2 text-left" style={{ minWidth: '150px' }}>User</th>
+                        {dates.map((date) => (
+                          <th key={date.toString()} className="border bg-muted px-4 py-2 text-center" style={{ minWidth: '100px' }}>
+                            <div>{format(date, 'EEE')}</div>
+                            <div className="text-xs">{format(date, 'MMM d')}</div>
+                            {workPeriod && (
+                              <div className="text-xs mt-1">
+                                {/* Show assigned vs needed */}
+                                <Badge variant={getAssignedCountForDate(format(date, 'yyyy-MM-dd')) < workPeriod.needed_capacity ? 'destructive' : 'secondary'} className="text-xs px-2 py-0 h-5">
+                                  {getAssignedCountForDate(format(date, 'yyyy-MM-dd'))}/{workPeriod.needed_capacity}
+                                </Badge>
+                              </div>
+                            )}
+                          </th>
+                        ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            
-            <p className="mt-4 text-sm text-muted-foreground">
-              {isAdmin ? 'Select users from the dropdown to assign them to shifts.' : 
-               'Contact an administrator to request changes to your schedule.'}
-            </p>
+                    </thead>
+                    <tbody>
+                      {assignedUsers.map((user) => (
+                        <tr key={user.id}>
+                          <td className="border px-4 py-2 bg-gray-50 font-medium">
+                            {getUserDisplayName(user)}
+                          </td>
+                          {dates.map((date) => {
+                            const dateKey = format(date, 'yyyy-MM-dd');
+                            const cellData = scheduleGrid[user.id]?.[dateKey];
+                            
+                            if (!cellData) return <td key={dateKey} className="border px-4 py-2"></td>;
+                            
+                            // Determine cell background color based on state
+                            let bgColor = 'bg-gray-200'; // default unassigned
+                            if (cellData.assigned) bgColor = 'bg-green-200';
+                            if (cellData.requested_off) bgColor = 'bg-red-200';
+                            
+                            return (
+                              <td key={dateKey} className={`border px-1 py-1 text-center ${bgColor} relative`}>
+                                <div className="flex flex-col h-10 justify-center">
+                                  {/* Click to toggle assignment */}
+                                  <button 
+                                    className="absolute inset-0 w-full h-full opacity-0"
+                                    onClick={() => isAdmin && toggleAssignment(user.id, dateKey)}
+                                    disabled={!isAdmin}
+                                  ></button>
+                                  
+                                  {/* Show locked status */}
+                                  {cellData.locked && (
+                                    <div className="absolute top-1 right-1">
+                                      <Lock className="w-3 h-3" />
+                                    </div>
+                                  )}
+                                  
+                                  {/* Right-click menu or secondary action */}
+                                  {isAdmin && (
+                                    <button 
+                                      className="absolute bottom-0 right-0 p-1 opacity-30 hover:opacity-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleLock(user.id, dateKey);
+                                      }}
+                                    >
+                                      <Lock className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  
+                                  <div>
+                                    {cellData.assigned ? 'Assigned' : 'Off'}
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                <p className="mt-4 text-sm text-muted-foreground">
+                  {isAdmin ? 'Click on cells to toggle assignment. Click the lock icon to prevent the optimizer from changing a cell.' : 
+                  'Contact an administrator to request changes to your schedule.'}
+                </p>
+              </>
+            )}
           </TabsContent>
           
           <TabsContent value="users" className="mt-6">
@@ -946,7 +981,7 @@ const WorkPeriodDetail = () => {
                             </div>
                           </TableCell>
                           <TableCell>{format(new Date(shift.shift_date), 'MMM d, yyyy')}</TableCell>
-                          <TableCell>{format(new Date(shift.created_at), 'MMM d, yyyy')}</TableCell>
+                          <TableCell>{shift.created_at ? format(new Date(shift.created_at), 'MMM d, yyyy') : 'Unknown'}</TableCell>
                           {isAdmin && (
                             <TableCell className="text-right space-x-2">
                               <Button 
