@@ -83,6 +83,36 @@ const WorkPeriodDetail = () => {
     }
   });
 
+  // Check if user has access to this work period
+  const { isLoading: isCheckingAccess, error: accessError } = useQuery({
+    queryKey: ['workPeriodAccess', id, user?.id, isAdmin],
+    queryFn: async () => {
+      // Admins have access to all work periods
+      if (isAdmin) return true;
+      
+      if (!id || !user?.id) throw new Error('Work period ID and user ID are required');
+      
+      const { data, error } = await supabase
+        .from('work_period_assignments')
+        .select('*')
+        .eq('work_period_id', id)
+        .eq('user_id', user.id)
+        .single();
+        
+      if (error) throw error;
+      return !!data;
+    },
+    onError: () => {
+      // Redirect to home if user doesn't have access
+      toast({
+        title: 'Access denied',
+        description: 'You do not have access to this work period.',
+        variant: 'destructive'
+      });
+      navigate('/');
+    }
+  });
+
   // Fetch users assigned to this work period
   const { data: assignedUsers, isLoading: isLoadingUsers, refetch: refetchAssignedUsers } = useQuery({
     queryKey: ['workPeriodUsers', id],
@@ -259,62 +289,62 @@ const WorkPeriodDetail = () => {
     }
   });
 
-  // Mutation for assigning a user to a shift row
-  const assignUserToShiftMutation = useMutation({
-    mutationFn: async ({ dateKey, capacityIndex, userId }: { dateKey: string, capacityIndex: number, userId: string }) => {
-      // First check if there's already a shift for this user on this date
-      const { data: existingShifts, error: fetchError } = await supabase
-        .from('shifts')
-        .select('*')
-        .eq('work_period_id', id!)
-        .eq('user_id', userId)
-        .eq('shift_date', dateKey);
+    // Mutation for assigning a user to a shift row
+    const assignUserToShiftMutation = useMutation({
+      mutationFn: async ({ dateKey, capacityIndex, userId }: { dateKey: string, capacityIndex: number, userId: string }) => {
+        // First check if there's already a shift for this user on this date
+        const { data: existingShifts, error: fetchError } = await supabase
+          .from('shifts')
+          .select('*')
+          .eq('work_period_id', id!)
+          .eq('user_id', userId)
+          .eq('shift_date', dateKey);
+          
+        if (fetchError) throw fetchError;
         
-      if (fetchError) throw fetchError;
-      
-      // If a shift exists for this user on this date, update it
-      if (existingShifts && existingShifts.length > 0) {
+        // If a shift exists for this user on this date, update it
+        if (existingShifts && existingShifts.length > 0) {
+          const { data, error } = await supabase
+            .from('shifts')
+            .update({ assigned: true })
+            .eq('id', existingShifts[0].id)
+            .select();
+            
+          if (error) throw error;
+          return data[0] as ShiftRecord;
+        }
+        
+        // Otherwise create a new shift
         const { data, error } = await supabase
           .from('shifts')
-          .update({ assigned: true })
-          .eq('id', existingShifts[0].id)
+          .insert([{
+            work_period_id: id!,
+            user_id: userId,
+            shift_date: dateKey,
+            assigned: true,
+            locked: false,
+            requested_off: false
+          }])
           .select();
           
         if (error) throw error;
         return data[0] as ShiftRecord;
+      },
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
+        toast({
+          title: 'User assigned',
+          description: 'User has been assigned to the shift.',
+        });
+      },
+      onError: (error) => {
+        toast({
+          title: 'Error assigning user',
+          description: error.message,
+          variant: 'destructive'
+        });
       }
-      
-      // Otherwise create a new shift
-      const { data, error } = await supabase
-        .from('shifts')
-        .insert([{
-          work_period_id: id!,
-          user_id: userId,
-          shift_date: dateKey,
-          assigned: true,
-          locked: false,
-          requested_off: false
-        }])
-        .select();
-        
-      if (error) throw error;
-      return data[0] as ShiftRecord;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
-      toast({
-        title: 'User assigned',
-        description: 'User has been assigned to the shift.',
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: 'Error assigning user',
-        description: error.message,
-        variant: 'destructive'
-      });
-    }
-  });
+    });
 
   // Initialize the schedule grid when data is loaded
   useEffect(() => {
@@ -634,7 +664,7 @@ const WorkPeriodDetail = () => {
   };
 
   // Loading state
-  if (isLoadingWorkPeriod || isLoadingUsers || isLoadingShifts) {
+  if (isLoadingWorkPeriod || isLoadingUsers || isLoadingShifts || isCheckingAccess) {
     return (
       <Layout>
         <div className="container py-6">
@@ -657,7 +687,7 @@ const WorkPeriodDetail = () => {
   }
 
   // Error state
-  if (workPeriodError) {
+  if (workPeriodError || accessError) {
     return (
       <Layout>
         <div className="container py-6">
@@ -768,7 +798,9 @@ const WorkPeriodDetail = () => {
               Users
               <Badge variant="secondary" className="ml-2">{assignedUsers.length}</Badge>
             </TabsTrigger>
-            <TabsTrigger value="requests">Day-Off Requests</TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="requests">Day-Off Requests</TabsTrigger>
+            )}
           </TabsList>
           
           <TabsContent value="schedule" className="mt-6">
@@ -872,236 +904,3 @@ const WorkPeriodDetail = () => {
                                     >
                                       <Lock className="w-3 h-3" />
                                     </button>
-                                  )}
-                                  
-                                  <div>
-                                    {cellData.assigned ? 'Assigned' : 'Off'}
-                                  </div>
-                                </div>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                
-                <p className="mt-4 text-sm text-muted-foreground">
-                  {isAdmin ? 'Click on cells to toggle assignment. Click the lock icon to prevent the optimizer from changing a cell.' : 
-                  'Contact an administrator to request changes to your schedule.'}
-                </p>
-              </>
-            )}
-          </TabsContent>
-          
-          <TabsContent value="users" className="mt-6">
-            {isAdmin && (
-              <div className="mb-4 flex justify-end">
-                <Button 
-                  onClick={() => setIsUserDialogOpen(true)}
-                  className="flex items-center"
-                >
-                  <UserPlus className="w-4 h-4 mr-2" /> Add Users
-                </Button>
-              </div>
-            )}
-            
-            <div className="bg-white rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>Name</TableHead>
-                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {assignedUsers.length > 0 ? (
-                    assignedUsers.map(user => (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <Avatar className="h-8 w-8 mr-2">
-                              <AvatarFallback>{(user.first_name?.[0] || '') + (user.last_name?.[0] || '')}</AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm">{user.id}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{getUserDisplayName(user)}</TableCell>
-                        {isAdmin && (
-                          <TableCell className="text-right">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => handleRemoveUser(user.id)}
-                              className="h-8 px-2 text-red-600 hover:text-red-800 hover:bg-red-50"
-                            >
-                              <UserMinus className="w-4 h-4 mr-1" /> Remove
-                            </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={isAdmin ? 3 : 2} className="text-center py-4 text-muted-foreground">
-                        No users assigned to this work period.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="requests">
-            <div className="bg-white rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Requested On</TableHead>
-                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {shifts && shifts.filter(shift => shift.requested_off).length > 0 ? (
-                    shifts.filter(shift => shift.requested_off).map(shift => {
-                      const user = assignedUsers.find(u => u.id === shift.user_id);
-                      return (
-                        <TableRow key={shift.id}>
-                          <TableCell>
-                            <div className="flex items-center">
-                              <Avatar className="h-8 w-8 mr-2">
-                                <AvatarFallback>{user ? (user.first_name?.[0] || '') + (user.last_name?.[0] || '') : 'U'}</AvatarFallback>
-                              </Avatar>
-                              <span>{user ? getUserDisplayName(user) : shift.user_id}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>{format(new Date(shift.shift_date), 'MMM d, yyyy')}</TableCell>
-                          <TableCell>{shift.created_at ? format(new Date(shift.created_at), 'MMM d, yyyy') : 'Unknown'}</TableCell>
-                          {isAdmin && (
-                            <TableCell className="text-right space-x-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => {
-                                  updateShiftMutation.mutate({
-                                    shiftId: shift.id,
-                                    updates: { requested_off: false, assigned: false }
-                                  });
-                                }}
-                                className="h-8 px-3 text-green-600"
-                              >
-                                <CheckCircle className="w-4 h-4 mr-1" /> Approve
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => {
-                                  updateShiftMutation.mutate({
-                                    shiftId: shift.id,
-                                    updates: { requested_off: false }
-                                  });
-                                }}
-                                className="h-8 px-3 text-red-600"
-                              >
-                                <XCircle className="w-4 h-4 mr-1" /> Deny
-                              </Button>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={isAdmin ? 4 : 3} className="text-center py-4 text-muted-foreground">
-                        No day-off requests for this work period.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </div>
-
-      {/* User management dialog */}
-      <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add Users to Work Period</DialogTitle>
-            <DialogDescription>
-              Select users to add to this work period. They will be available for shift assignments.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="my-4">
-            <Input
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="mb-4"
-            />
-            
-            <div className="max-h-[300px] overflow-y-auto border rounded-md">
-              {isLoadingAllUsers ? (
-                <div className="p-4 text-center">Loading users...</div>
-              ) : filteredUsers.length > 0 ? (
-                <Table>
-                  <TableBody>
-                    {filteredUsers.map(user => {
-                      const isAssigned = assignedUsers?.some(au => au.id === user.id);
-                      return (
-                        <TableRow key={user.id}>
-                          <TableCell>
-                            <div className="flex items-center">
-                              <Avatar className="h-8 w-8 mr-2">
-                                <AvatarFallback>{(user.first_name?.[0] || '') + (user.last_name?.[0] || '')}</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <div>{getUserDisplayName(user)}</div>
-                                <div className="text-xs text-muted-foreground">{user.id}</div>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {isAssigned ? (
-                              <Badge variant="secondary" className="bg-gray-100">Assigned</Badge>
-                            ) : (
-                              <Button 
-                                size="sm" 
-                                onClick={() => {
-                                  handleAddUser(user.id);
-                                }}
-                              >
-                                Add
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="p-4 text-center text-muted-foreground">
-                  No users found matching "{searchTerm}"
-                </div>
-              )}
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUserDialogOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Layout>
-  );
-};
-
-export default WorkPeriodDetail;

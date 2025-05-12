@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/providers/AuthProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -14,6 +14,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
 }) => {
   const { isAuthenticated, isLoading, isAdmin } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -29,7 +30,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />;
+    // Redirect to auth but remember where the user was trying to go
+    return <Navigate to="/auth" state={{ from: location.pathname }} replace />;
   }
 
   if (requireAdmin && !isAdmin) {

@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/providers/AuthProvider';
 
 // Define our work period type
 export type WorkPeriod = {
@@ -25,14 +26,36 @@ const WorkPeriodList: React.FC = () => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { isAdmin, user } = useAuth();
 
-  // Fetch work periods from Supabase
+  // Fetch work periods from Supabase - for admins, get all; for regular users, only get assigned ones
   const { data: workPeriods, isLoading, error } = useQuery({
-    queryKey: ['workPeriods'],
+    queryKey: ['workPeriods', isAdmin, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('work_periods')
-        .select('*');
+      let query = supabase.from('work_periods').select('*');
+      
+      // If not admin, only fetch work periods the user is assigned to
+      if (!isAdmin && user) {
+        const { data: assignedPeriods, error: assignmentError } = await supabase
+          .from('work_period_assignments')
+          .select('work_period_id')
+          .eq('user_id', user.id);
+          
+        if (assignmentError) {
+          throw assignmentError;
+        }
+        
+        // If user is not assigned to any work periods, return empty array
+        if (!assignedPeriods || assignedPeriods.length === 0) {
+          return [];
+        }
+        
+        // Get only the work periods the user is assigned to
+        const workPeriodIds = assignedPeriods.map(a => a.work_period_id);
+        query = query.in('id', workPeriodIds);
+      }
+      
+      const { data, error } = await query;
       
       if (error) {
         throw error;
@@ -92,9 +115,11 @@ const WorkPeriodList: React.FC = () => {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <h2 className="text-2xl font-bold">Work Periods</h2>
-          <Button onClick={() => setIsCreateDialogOpen(true)}>
-            Create Work Period
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => setIsCreateDialogOpen(true)}>
+              Create Work Period
+            </Button>
+          )}
         </div>
         <div className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           <p>Error loading work periods: {error.message}</p>
@@ -107,9 +132,11 @@ const WorkPeriodList: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Work Periods</h2>
-        <Button onClick={() => setIsCreateDialogOpen(true)}>
-          Create Work Period
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            Create Work Period
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -158,7 +185,11 @@ const WorkPeriodList: React.FC = () => {
             ))
           ) : (
             <div className="col-span-full text-center py-12">
-              <p className="text-muted-foreground">No work periods found. Create one to get started.</p>
+              <p className="text-muted-foreground">
+                {isAdmin
+                  ? "No work periods found. Create one to get started."
+                  : "You are not assigned to any work periods."}
+              </p>
             </div>
           )}
         </div>
