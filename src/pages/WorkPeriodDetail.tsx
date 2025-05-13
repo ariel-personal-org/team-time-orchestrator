@@ -18,6 +18,7 @@ import { initializeScheduleGrid, getDates } from '@/utils/scheduleUtils';
 import ScheduleGridComponent from '@/components/workperiod/ScheduleGrid';
 import UsersList from '@/components/workperiod/UsersList';
 import StatsCards from '@/components/workperiod/StatsCards';
+import EditWorkPeriodDialog from '@/components/workperiod/EditWorkPeriodDialog';
 
 const WorkPeriodDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +27,7 @@ const WorkPeriodDetail = () => {
   const { isAdmin, user } = useAuth();
   const [scheduleGrid, setScheduleGrid] = useState<ScheduleGridType>({});
   const [selectedTab, setSelectedTab] = useState('schedule');
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   
   // Fetch work period details
   const { data: workPeriod, isLoading: isLoadingWorkPeriod, error: workPeriodError } = useQuery({
@@ -54,7 +56,7 @@ const WorkPeriodDetail = () => {
       if (!id || !user?.id) throw new Error('Work period ID and user ID are required');
       
       const { data, error } = await supabase
-        .from('work_period_assignments')
+        .from('work_period_users') // Updated table name
         .select('*')
         .eq('work_period_id', id)
         .eq('user_id', user.id)
@@ -76,24 +78,24 @@ const WorkPeriodDetail = () => {
     }
   });
 
-  // Fetch users assigned to this work period
+  // Fetch users allocated to this work period
   const { data: assignedUsers, isLoading: isLoadingUsers, refetch: refetchAssignedUsers } = useQuery({
     queryKey: ['workPeriodUsers', id],
     queryFn: async () => {
       if (!id) throw new Error('Work period ID is required');
       
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from('work_period_assignments')
+      const { data: allocations, error: allocationsError } = await supabase
+        .from('work_period_users') // Updated table name
         .select('user_id')
         .eq('work_period_id', id);
         
-      if (assignmentsError) throw assignmentsError;
+      if (allocationsError) throw allocationsError;
       
-      // If there are no assignments, return empty array
-      if (!assignments || assignments.length === 0) return [];
+      // If there are no allocations, return empty array
+      if (!allocations || allocations.length === 0) return [];
       
       // Get user profiles for each assigned user
-      const userIds = assignments.map(assignment => assignment.user_id);
+      const userIds = allocations.map(allocation => allocation.user_id);
       
       // Fetch user profiles from profiles table
       const { data: profiles, error: profilesError } = await supabase
@@ -221,7 +223,7 @@ const WorkPeriodDetail = () => {
             </p>
           </div>
           {isAdmin && (
-            <Button onClick={() => {}}>Edit Work Period</Button>
+            <Button onClick={() => setIsEditDialogOpen(true)}>Edit Work Period</Button>
           )}
         </div>
 
@@ -273,6 +275,15 @@ const WorkPeriodDetail = () => {
             </TabsContent>
           )}
         </Tabs>
+        
+        {/* Edit Work Period Dialog */}
+        {workPeriod && (
+          <EditWorkPeriodDialog 
+            open={isEditDialogOpen} 
+            onOpenChange={setIsEditDialogOpen} 
+            workPeriod={workPeriod} 
+          />
+        )}
       </div>
     </Layout>
   );

@@ -28,30 +28,30 @@ const WorkPeriodList: React.FC = () => {
   const queryClient = useQueryClient();
   const { isAdmin, user } = useAuth();
 
-  // Fetch work periods from Supabase - for admins, get all; for regular users, only get assigned ones
+  // Fetch work periods from Supabase - for admins, get all; for regular users, only get allocated ones
   const { data: workPeriods, isLoading, error } = useQuery({
     queryKey: ['workPeriods', isAdmin, user?.id],
     queryFn: async () => {
       let query = supabase.from('work_periods').select('*');
       
-      // If not admin, only fetch work periods the user is assigned to
+      // If not admin, only fetch work periods the user is allocated to
       if (!isAdmin && user) {
-        const { data: assignedPeriods, error: assignmentError } = await supabase
-          .from('work_period_assignments')
+        const { data: allocatedPeriods, error: allocationError } = await supabase
+          .from('work_period_users') // Updated table name
           .select('work_period_id')
           .eq('user_id', user.id);
           
-        if (assignmentError) {
-          throw assignmentError;
+        if (allocationError) {
+          throw allocationError;
         }
         
-        // If user is not assigned to any work periods, return empty array
-        if (!assignedPeriods || assignedPeriods.length === 0) {
+        // If user is not allocated to any work periods, return empty array
+        if (!allocatedPeriods || allocatedPeriods.length === 0) {
           return [];
         }
         
-        // Get only the work periods the user is assigned to
-        const workPeriodIds = assignedPeriods.map(a => a.work_period_id);
+        // Get only the work periods the user is allocated to
+        const workPeriodIds = allocatedPeriods.map(a => a.work_period_id);
         query = query.in('id', workPeriodIds);
       }
       
@@ -64,7 +64,7 @@ const WorkPeriodList: React.FC = () => {
       // Get user count for each work period
       const periodsWithUserCounts = await Promise.all(data.map(async (period) => {
         const { count, error: countError } = await supabase
-          .from('work_period_assignments')
+          .from('work_period_users') // Updated table name
           .select('*', { count: 'exact', head: true })
           .eq('work_period_id', period.id);
           
@@ -173,7 +173,7 @@ const WorkPeriodList: React.FC = () => {
                 <CardContent>
                   <div className="space-y-2">
                     <p><span className="font-medium">Needed Capacity:</span> {period.needed_capacity} users per shift</p>
-                    <p><span className="font-medium">Users Assigned:</span> {period.userCount || 0}</p>
+                    <p><span className="font-medium">Users Allocated:</span> {period.userCount || 0}</p>
                   </div>
                 </CardContent>
                 <CardFooter>
@@ -188,7 +188,7 @@ const WorkPeriodList: React.FC = () => {
               <p className="text-muted-foreground">
                 {isAdmin
                   ? "No work periods found. Create one to get started."
-                  : "You are not assigned to any work periods."}
+                  : "You are not allocated to any work periods."}
               </p>
             </div>
           )}

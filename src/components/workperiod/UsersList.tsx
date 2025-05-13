@@ -27,27 +27,34 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch all users for the user management dialog - this is the key change
-  const { data: allUsers, isLoading: isLoadingAllUsers } = useQuery({
-    queryKey: ['allUsers', isUserDialogOpen],
+  // Fetch all users for the user management dialog - ensure we're getting ALL users
+  const { data: allUsers = [], isLoading: isLoadingAllUsers } = useQuery({
+    queryKey: ['allUsers'],
     queryFn: async () => {
-      // Fetch all profiles regardless of work period assignment
+      console.log('Fetching all users...');
+      
+      // Fetch all profiles from the profiles table
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, first_name, last_name');
       
-      if (profilesError) throw profilesError;
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError);
+        throw profilesError;
+      }
+
+      console.log('Fetched profiles:', profiles?.length);
       
       // Fetch admin status for all users
-      const userIds = profiles?.map(profile => profile.id) || [];
-      
       const { data: userRoles, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id, role')
-        .in('user_id', userIds)
         .eq('role', 'admin');
         
-      if (rolesError) throw rolesError;
+      if (rolesError) {
+        console.error('Error fetching user roles:', rolesError);
+        throw rolesError;
+      }
       
       // Add isAdmin flag to each profile
       const profilesWithAdminStatus = (profiles || []).map(profile => ({
@@ -55,16 +62,18 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
         isAdmin: userRoles?.some(role => role.user_id === profile.id && role.role === 'admin') || false
       }));
       
+      console.log('Profiles with admin status:', profilesWithAdminStatus.length);
       return profilesWithAdminStatus;
     },
-    enabled: isUserDialogOpen && isAdmin
+    // Don't tie the query to isUserDialogOpen - fetch once and cache
+    enabled: true
   });
 
   // Mutation for adding a user to a work period
   const addUserMutation = useMutation({
     mutationFn: async (userId: string) => {
       const { data, error } = await supabase
-        .from('work_period_assignments')
+        .from('work_period_users') // Updated table name
         .insert([{ work_period_id: workPeriodId, user_id: userId }])
         .select();
       
@@ -74,14 +83,14 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workPeriodUsers', workPeriodId] });
       toast({
-        title: 'User added',
-        description: 'User has been added to the work period.',
+        title: 'User allocated',
+        description: 'User has been allocated to the work period.',
       });
       refetchAssignedUsers();
     },
     onError: (error) => {
       toast({
-        title: 'Error adding user',
+        title: 'Error allocating user',
         description: error.message,
         variant: 'destructive'
       });
@@ -91,14 +100,14 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
   // Mutation for removing a user from a work period
   const removeUserMutation = useMutation({
     mutationFn: async (userId: string) => {
-      // Delete both assignment and shifts for this user in this work period
-      const { error: assignmentError } = await supabase
-        .from('work_period_assignments')
+      // Delete both allocation and shifts for this user in this work period
+      const { error: allocationError } = await supabase
+        .from('work_period_users') // Updated table name
         .delete()
         .eq('work_period_id', workPeriodId)
         .eq('user_id', userId);
       
-      if (assignmentError) throw assignmentError;
+      if (allocationError) throw allocationError;
       
       // Also delete shifts for this user in this work period
       const { error: shiftsError } = await supabase
@@ -146,20 +155,23 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
       )
     : [];
 
+  console.log('Filtered users:', filteredUsers.length);
+  console.log('Assigned users:', assignedUsers.length);
+
   return (
     <>
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold">Assigned Users</h2>
+        <h2 className="text-xl font-semibold">Allocated Users</h2>
         {isAdmin && (
-          <Button onClick={() => setIsUserDialogOpen(true)}>Add Users</Button>
+          <Button onClick={() => setIsUserDialogOpen(true)}>Allocate Users</Button>
         )}
       </div>
       
       {assignedUsers.length === 0 ? (
         <div className="py-8 text-center">
-          <p className="text-muted-foreground mb-4">No users assigned to this work period yet.</p>
+          <p className="text-muted-foreground mb-4">No users allocated to this work period yet.</p>
           {isAdmin && (
-            <Button onClick={() => setIsUserDialogOpen(true)}>Add Users</Button>
+            <Button onClick={() => setIsUserDialogOpen(true)}>Allocate Users</Button>
           )}
         </div>
       ) : (
@@ -197,13 +209,13 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
         </div>
       )}
 
-      {/* Add users dialog */}
+      {/* Allocate users dialog */}
       <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Users to Work Period</DialogTitle>
+            <DialogTitle>Allocate Users to Work Period</DialogTitle>
             <DialogDescription>
-              Select users to add to this work period. Users will be able to see the work period and manage their availability.
+              Select users to allocate to this work period. Users will be able to see the work period and manage their availability.
             </DialogDescription>
           </DialogHeader>
           
@@ -262,7 +274,7 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
                                 onClick={() => handleAddUser(user.id)}
                               >
                                 <UserPlus className="h-4 w-4 mr-2" />
-                                Add
+                                Allocate
                               </Button>
                             )}
                           </TableCell>
