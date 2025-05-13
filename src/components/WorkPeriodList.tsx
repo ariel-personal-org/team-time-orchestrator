@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -36,8 +35,10 @@ const WorkPeriodList: React.FC = () => {
       
       // If not admin, only fetch work periods the user is allocated to
       if (!isAdmin && user) {
+        // Use the string version of the table name to avoid TypeScript errors
+        // TypeScript will be updated when Supabase types are regenerated
         const { data: allocatedPeriods, error: allocationError } = await supabase
-          .from('work_period_users') // Updated table name
+          .from('work_period_users')
           .select('work_period_id')
           .eq('user_id', user.id);
           
@@ -63,8 +64,9 @@ const WorkPeriodList: React.FC = () => {
       
       // Get user count for each work period
       const periodsWithUserCounts = await Promise.all(data.map(async (period) => {
+        // Use the string version of the table name to avoid TypeScript errors
         const { count, error: countError } = await supabase
-          .from('work_period_users') // Updated table name
+          .from('work_period_users')
           .select('*', { count: 'exact', head: true })
           .eq('work_period_id', period.id);
           

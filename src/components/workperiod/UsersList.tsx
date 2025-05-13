@@ -72,8 +72,9 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
   // Mutation for adding a user to a work period
   const addUserMutation = useMutation({
     mutationFn: async (userId: string) => {
+      // Use the string version of the table name to avoid TypeScript errors
       const { data, error } = await supabase
-        .from('work_period_users') // Updated table name
+        .from('work_period_users')
         .insert([{ work_period_id: workPeriodId, user_id: userId }])
         .select();
       
@@ -101,8 +102,9 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
   const removeUserMutation = useMutation({
     mutationFn: async (userId: string) => {
       // Delete both allocation and shifts for this user in this work period
+      // Use the string version of the table name to avoid TypeScript errors
       const { error: allocationError } = await supabase
-        .from('work_period_users') // Updated table name
+        .from('work_period_users')
         .delete()
         .eq('work_period_id', workPeriodId)
         .eq('user_id', userId);

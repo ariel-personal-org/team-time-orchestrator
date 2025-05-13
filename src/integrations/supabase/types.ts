@@ -101,7 +101,7 @@ export type Database = {
         }
         Relationships: []
       }
-      work_period_assignments: {
+      work_period_users: {
         Row: {
           created_at: string
           id: string
@@ -122,7 +122,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "work_period_assignments_work_period_id_fkey"
+            foreignKeyName: "work_period_users_work_period_id_fkey"
             columns: ["work_period_id"]
             isOneToOne: false
             referencedRelation: "work_periods"

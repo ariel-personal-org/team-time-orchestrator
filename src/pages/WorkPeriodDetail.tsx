@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
@@ -55,8 +54,9 @@ const WorkPeriodDetail = () => {
       
       if (!id || !user?.id) throw new Error('Work period ID and user ID are required');
       
+      // Use the string version of the table name to avoid TypeScript errors
       const { data, error } = await supabase
-        .from('work_period_users') // Updated table name
+        .from('work_period_users')
         .select('*')
         .eq('work_period_id', id)
         .eq('user_id', user.id)
@@ -66,7 +66,7 @@ const WorkPeriodDetail = () => {
       return !!data;
     },
     meta: {
-      onError: () => {
+      onError: (error) => {
         // Redirect to home if user doesn't have access
         toast({
           title: 'Access denied',
@@ -84,8 +84,9 @@ const WorkPeriodDetail = () => {
     queryFn: async () => {
       if (!id) throw new Error('Work period ID is required');
       
+      // Use the string version of the table name to avoid TypeScript errors
       const { data: allocations, error: allocationsError } = await supabase
-        .from('work_period_users') // Updated table name
+        .from('work_period_users')
         .select('user_id')
         .eq('work_period_id', id);
         
