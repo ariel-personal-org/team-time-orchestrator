@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
@@ -102,6 +103,17 @@ const WorkPeriodDetail = () => {
         
       if (error) throw error;
       return !!data;
+    },
+    onSuccess: (data) => {
+      if (!data) {
+        // Redirect to home if user doesn't have access
+        toast({
+          title: 'Access denied',
+          description: 'You do not have access to this work period.',
+          variant: 'destructive'
+        });
+        navigate('/');
+      }
     },
     onError: () => {
       // Redirect to home if user doesn't have access
@@ -521,7 +533,7 @@ const WorkPeriodDetail = () => {
       // Count currently assigned users for this date
       let assignedCount = 0;
       userIds.forEach(userId => {
-        if (newGrid[userId][dateKey].assigned) {
+        if (newGrid[userId] && newGrid[userId][dateKey] && newGrid[userId][dateKey].assigned) {
           assignedCount++;
         }
       });
@@ -530,13 +542,17 @@ const WorkPeriodDetail = () => {
       if (assignedCount < workPeriod.needed_capacity) {
         // Sort users by total assigned shifts (ascending)
         const sortedUsers = [...userIds].sort((a, b) => {
-          const aAssignments = Object.values(newGrid[a]).filter(cell => cell.assigned).length;
-          const bAssignments = Object.values(newGrid[b]).filter(cell => cell.assigned).length;
+          const aAssignments = Object.values(newGrid[a] || {})
+            .filter(cell => cell && (cell as CellData).assigned).length;
+          const bAssignments = Object.values(newGrid[b] || {})
+            .filter(cell => cell && (cell as CellData).assigned).length;
           return aAssignments - bAssignments;
         });
         
         // Assign shifts to users with fewer shifts
         for (const userId of sortedUsers) {
+          if (!newGrid[userId] || !newGrid[userId][dateKey]) continue;
+          
           const cellData = newGrid[userId][dateKey];
           
           // Skip if already assigned, locked, or requested off
@@ -557,13 +573,17 @@ const WorkPeriodDetail = () => {
       else if (assignedCount > workPeriod.needed_capacity) {
         // Sort users by total assigned shifts (descending)
         const sortedUsers = [...userIds].sort((a, b) => {
-          const aAssignments = Object.values(newGrid[a]).filter(cell => cell.assigned).length;
-          const bAssignments = Object.values(newGrid[b]).filter(cell => cell.assigned).length;
+          const aAssignments = Object.values(newGrid[a] || {})
+            .filter(cell => cell && (cell as CellData).assigned).length;
+          const bAssignments = Object.values(newGrid[b] || {})
+            .filter(cell => cell && (cell as CellData).assigned).length;
           return bAssignments - aAssignments;
         });
         
         // Remove shifts from users with more shifts
         for (const userId of sortedUsers) {
+          if (!newGrid[userId] || !newGrid[userId][dateKey]) continue;
+          
           const cellData = newGrid[userId][dateKey];
           
           // Skip if locked
@@ -591,11 +611,16 @@ const WorkPeriodDetail = () => {
     const promises: Promise<any>[] = [];
     
     userIds.forEach(userId => {
+      if (!newGrid[userId]) return;
+      
       const days = differenceInDays(parseISO(workPeriod.end_date), parseISO(workPeriod.start_date)) + 1;
       
       for (let i = 0; i < days; i++) {
         const date = addDays(parseISO(workPeriod.start_date), i);
         const dateKey = format(date, 'yyyy-MM-dd');
+        
+        if (!scheduleGrid[userId] || !scheduleGrid[userId][dateKey] || !newGrid[userId][dateKey]) continue;
+        
         const oldCell = scheduleGrid[userId][dateKey];
         const newCell = newGrid[userId][dateKey];
         
