@@ -63,14 +63,16 @@ const WorkPeriodDetail = () => {
       if (error) throw error;
       return !!data;
     },
-    onError: () => {
-      // Redirect to home if user doesn't have access
-      toast({
-        title: 'Access denied',
-        description: 'You do not have access to this work period.',
-        variant: 'destructive'
-      });
-      navigate('/');
+    meta: {
+      onError: () => {
+        // Redirect to home if user doesn't have access
+        toast({
+          title: 'Access denied',
+          description: 'You do not have access to this work period.',
+          variant: 'destructive'
+        });
+        navigate('/');
+      }
     }
   });
 
@@ -227,7 +229,7 @@ const WorkPeriodDetail = () => {
         <StatsCards 
           workPeriod={workPeriod}
           assignedUsers={assignedUsers}
-          shifts={shifts}
+          shifts={shifts || []}
           datesLength={dates.length}
         />
 

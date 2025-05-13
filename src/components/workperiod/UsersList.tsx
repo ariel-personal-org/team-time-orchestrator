@@ -27,10 +27,11 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch all users for the user management dialog
+  // Fetch all users for the user management dialog - this is the key change
   const { data: allUsers, isLoading: isLoadingAllUsers } = useQuery({
     queryKey: ['allUsers', isUserDialogOpen],
     queryFn: async () => {
+      // Fetch all profiles regardless of work period assignment
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, first_name, last_name');
@@ -76,6 +77,7 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
         title: 'User added',
         description: 'User has been added to the work period.',
       });
+      refetchAssignedUsers();
     },
     onError: (error) => {
       toast({
@@ -116,6 +118,7 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
         title: 'User removed',
         description: 'User has been removed from the work period.',
       });
+      refetchAssignedUsers();
     },
     onError: (error) => {
       toast({
@@ -134,6 +137,7 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
     removeUserMutation.mutate(userId);
   };
 
+  // Make sure we have data before filtering
   const filteredUsers = allUsers 
     ? allUsers.filter(user => 
         (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
