@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Lock, UserPlus, UserMinus, Users, CheckCircle, XCircle } from 'lucide-react';
+import { UserPlus, UserMinus, Users, Shield, Lock, Unlock } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -53,6 +53,7 @@ type UserProfile = {
   first_name: string | null;
   last_name: string | null;
   email?: string;
+  isAdmin?: boolean;
 };
 
 const WorkPeriodDetail = () => {
@@ -132,7 +133,7 @@ const WorkPeriodDetail = () => {
       // Get user profiles for each assigned user
       const userIds = assignments.map(assignment => assignment.user_id);
       
-      // Fetch user profiles from the auth.users table via profiles
+      // Fetch user profiles from profiles table
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, first_name, last_name')
@@ -140,20 +141,53 @@ const WorkPeriodDetail = () => {
       
       if (profilesError) throw profilesError;
       
-      return profiles || [];
+      // Fetch admin status for each user
+      const { data: userRoles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .in('user_id', userIds)
+        .eq('role', 'admin');
+        
+      if (rolesError) throw rolesError;
+      
+      // Add isAdmin flag to each profile
+      const profilesWithAdminStatus = (profiles || []).map(profile => ({
+        ...profile,
+        isAdmin: userRoles?.some(role => role.user_id === profile.id && role.role === 'admin') || false
+      }));
+      
+      return profilesWithAdminStatus;
     }
   });
 
   // Fetch all users for the user management dialog
   const { data: allUsers, isLoading: isLoadingAllUsers } = useQuery({
-    queryKey: ['allUsers'],
+    queryKey: ['allUsers', isUserDialogOpen],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, first_name, last_name');
       
-      if (error) throw error;
-      return data || [];
+      if (profilesError) throw profilesError;
+      
+      // Fetch admin status for all users
+      const userIds = profiles?.map(profile => profile.id) || [];
+      
+      const { data: userRoles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .in('user_id', userIds)
+        .eq('role', 'admin');
+        
+      if (rolesError) throw rolesError;
+      
+      // Add isAdmin flag to each profile
+      const profilesWithAdminStatus = (profiles || []).map(profile => ({
+        ...profile,
+        isAdmin: userRoles?.some(role => role.user_id === profile.id && role.role === 'admin') || false
+      }));
+      
+      return profilesWithAdminStatus;
     },
     enabled: isUserDialogOpen && isAdmin
   });
@@ -289,63 +323,6 @@ const WorkPeriodDetail = () => {
     }
   });
 
-    // Mutation for assigning a user to a shift row
-    const assignUserToShiftMutation = useMutation({
-      mutationFn: async ({ dateKey, capacityIndex, userId }: { dateKey: string, capacityIndex: number, userId: string }) => {
-        // First check if there's already a shift for this user on this date
-        const { data: existingShifts, error: fetchError } = await supabase
-          .from('shifts')
-          .select('*')
-          .eq('work_period_id', id!)
-          .eq('user_id', userId)
-          .eq('shift_date', dateKey);
-          
-        if (fetchError) throw fetchError;
-        
-        // If a shift exists for this user on this date, update it
-        if (existingShifts && existingShifts.length > 0) {
-          const { data, error } = await supabase
-            .from('shifts')
-            .update({ assigned: true })
-            .eq('id', existingShifts[0].id)
-            .select();
-            
-          if (error) throw error;
-          return data[0] as ShiftRecord;
-        }
-        
-        // Otherwise create a new shift
-        const { data, error } = await supabase
-          .from('shifts')
-          .insert([{
-            work_period_id: id!,
-            user_id: userId,
-            shift_date: dateKey,
-            assigned: true,
-            locked: false,
-            requested_off: false
-          }])
-          .select();
-          
-        if (error) throw error;
-        return data[0] as ShiftRecord;
-      },
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', id] });
-        toast({
-          title: 'User assigned',
-          description: 'User has been assigned to the shift.',
-        });
-      },
-      onError: (error) => {
-        toast({
-          title: 'Error assigning user',
-          description: error.message,
-          variant: 'destructive'
-        });
-      }
-    });
-
   // Initialize the schedule grid when data is loaded
   useEffect(() => {
     if (workPeriod && assignedUsers && shifts) {
@@ -462,6 +439,67 @@ const WorkPeriodDetail = () => {
         assigned: cellData.assigned,
         locked: !cellData.locked,
         requested_off: cellData.requested_off
+      });
+    }
+  };
+
+  // Toggle lock status for an entire column (date)
+  const toggleColumnLock = async (dateKey: string) => {
+    if (!isAdmin || !assignedUsers) return;
+    
+    // Check if the column is currently locked (if any cell is locked)
+    const isColumnLocked = Object.keys(scheduleGrid).some(userId => 
+      scheduleGrid[userId]?.[dateKey]?.locked
+    );
+    
+    // Toggle lock state for all cells in the column
+    const newLockState = !isColumnLocked;
+    
+    // Update UI optimistically
+    const newGrid = { ...scheduleGrid };
+    assignedUsers.forEach(user => {
+      if (newGrid[user.id]?.[dateKey]) {
+        newGrid[user.id][dateKey].locked = newLockState;
+      }
+    });
+    
+    setScheduleGrid(newGrid);
+    
+    // Update or create shift records
+    const promises: Promise<any>[] = [];
+    
+    assignedUsers.forEach(user => {
+      const cellData = scheduleGrid[user.id]?.[dateKey];
+      if (!cellData) return;
+      
+      if (cellData.id) {
+        promises.push(updateShiftMutation.mutateAsync({
+          shiftId: cellData.id,
+          updates: { locked: newLockState }
+        }));
+      } else {
+        promises.push(createShiftMutation.mutateAsync({
+          work_period_id: id!,
+          user_id: user.id,
+          shift_date: dateKey,
+          assigned: cellData.assigned,
+          locked: newLockState,
+          requested_off: cellData.requested_off
+        }));
+      }
+    });
+    
+    try {
+      await Promise.all(promises);
+      toast({
+        title: `Column ${newLockState ? 'Locked' : 'Unlocked'}`,
+        description: `All shifts for ${format(parseISO(dateKey), 'MMM d')} have been ${newLockState ? 'locked' : 'unlocked'}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error updating shifts',
+        description: error.message,
+        variant: 'destructive'
       });
     }
   };
@@ -636,6 +674,15 @@ const WorkPeriodDetail = () => {
     return count;
   };
 
+  // Check if a column is fully locked
+  const isColumnLocked = (dateKey: string) => {
+    if (!assignedUsers || !scheduleGrid) return false;
+    
+    return assignedUsers.every(user => 
+      scheduleGrid[user.id]?.[dateKey]?.locked
+    );
+  };
+
   const handleAddUser = (userId: string) => {
     addUserMutation.mutate(userId);
   };
@@ -644,23 +691,11 @@ const WorkPeriodDetail = () => {
     removeUserMutation.mutate(userId);
   };
 
-  const handleAssignUserToShift = (dateKey: string, capacityIndex: number, userId: string) => {
-    assignUserToShiftMutation.mutate({ dateKey, capacityIndex, userId });
-  };
-
   const getUserDisplayName = (user: UserProfile) => {
     if (user.first_name || user.last_name) {
       return `${user.first_name || ''} ${user.last_name || ''}`.trim();
     }
     return user.id;
-  };
-
-  // Get users assigned to a specific date
-  const getUsersAssignedToDate = (dateKey: string): string[] => {
-    if (!shifts) return [];
-    return shifts
-      .filter(shift => shift.shift_date === dateKey && shift.assigned)
-      .map(shift => shift.user_id);
   };
 
   // Loading state
@@ -725,11 +760,13 @@ const WorkPeriodDetail = () => {
   }
 
   const dates = getDates();
-  const filteredUsers = allUsers ? allUsers.filter(user => 
-    (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    user.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.id.toLowerCase().includes(searchTerm.toLowerCase()))
-  ) : [];
+  const filteredUsers = allUsers 
+    ? allUsers.filter(user => 
+        (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        user.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.id.toLowerCase().includes(searchTerm.toLowerCase()))
+      )
+    : [];
   
   return (
     <Layout>
@@ -843,27 +880,58 @@ const WorkPeriodDetail = () => {
                     <thead>
                       <tr>
                         <th className="border bg-muted px-4 py-2 text-left" style={{ minWidth: '150px' }}>User</th>
-                        {dates.map((date) => (
-                          <th key={date.toString()} className="border bg-muted px-4 py-2 text-center" style={{ minWidth: '100px' }}>
-                            <div>{format(date, 'EEE')}</div>
-                            <div className="text-xs">{format(date, 'MMM d')}</div>
-                            {workPeriod && (
-                              <div className="text-xs mt-1">
-                                {/* Show assigned vs needed */}
-                                <Badge variant={getAssignedCountForDate(format(date, 'yyyy-MM-dd')) < workPeriod.needed_capacity ? 'destructive' : 'secondary'} className="text-xs px-2 py-0 h-5">
-                                  {getAssignedCountForDate(format(date, 'yyyy-MM-dd'))}/{workPeriod.needed_capacity}
-                                </Badge>
+                        {dates.map((date) => {
+                          const dateKey = format(date, 'yyyy-MM-dd');
+                          const assignedCount = getAssignedCountForDate(dateKey);
+                          const isLocked = isColumnLocked(dateKey);
+                          
+                          return (
+                            <th key={date.toString()} className="border bg-muted px-4 py-2 text-center" style={{ minWidth: '100px' }}>
+                              <div className="flex justify-between items-center">
+                                <span>{format(date, 'EEE')}</span>
+                                {isAdmin && (
+                                  <button 
+                                    className="opacity-60 hover:opacity-100" 
+                                    onClick={() => toggleColumnLock(dateKey)}
+                                  >
+                                    {isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                                  </button>
+                                )}
                               </div>
-                            )}
-                          </th>
-                        ))}
+                              <div className="text-xs">{format(date, 'MMM d')}</div>
+                              {workPeriod && (
+                                <div className="text-xs mt-1">
+                                  <Badge 
+                                    variant={
+                                      assignedCount < workPeriod.needed_capacity 
+                                        ? 'destructive' 
+                                        : assignedCount === workPeriod.needed_capacity 
+                                          ? 'default' 
+                                          : 'secondary'
+                                    } 
+                                    className="text-xs px-2 py-0 h-5"
+                                  >
+                                    {assignedCount}/{workPeriod.needed_capacity}
+                                  </Badge>
+                                </div>
+                              )}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
                       {assignedUsers.map((user) => (
                         <tr key={user.id}>
                           <td className="border px-4 py-2 bg-gray-50 font-medium">
-                            {getUserDisplayName(user)}
+                            <div className="flex items-center gap-2">
+                              {getUserDisplayName(user)}
+                              {user.isAdmin ? (
+                                <Badge variant="default" className="text-xs">Admin</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-xs">Regular</Badge>
+                              )}
+                            </div>
                           </td>
                           {dates.map((date) => {
                             const dateKey = format(date, 'yyyy-MM-dd');
@@ -880,11 +948,13 @@ const WorkPeriodDetail = () => {
                               <td key={dateKey} className={`border px-1 py-1 text-center ${bgColor} relative`}>
                                 <div className="flex flex-col h-10 justify-center">
                                   {/* Click to toggle assignment */}
-                                  <button 
-                                    className="absolute inset-0 w-full h-full opacity-0"
-                                    onClick={() => isAdmin && toggleAssignment(user.id, dateKey)}
-                                    disabled={!isAdmin}
-                                  ></button>
+                                  {isAdmin && (
+                                    <button 
+                                      className="absolute inset-0 w-full h-full opacity-0"
+                                      onClick={() => toggleAssignment(user.id, dateKey)}
+                                      disabled={cellData.locked}
+                                    ></button>
+                                  )}
                                   
                                   {/* Show locked status */}
                                   {cellData.locked && (
@@ -904,3 +974,168 @@ const WorkPeriodDetail = () => {
                                     >
                                       <Lock className="w-3 h-3" />
                                     </button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </TabsContent>
+          
+          <TabsContent value="users" className="mt-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Assigned Users</h2>
+              {isAdmin && (
+                <Button onClick={() => setIsUserDialogOpen(true)}>Add Users</Button>
+              )}
+            </div>
+            
+            {assignedUsers.length === 0 ? (
+              <div className="py-8 text-center">
+                <p className="text-muted-foreground mb-4">No users assigned to this work period yet.</p>
+                {isAdmin && (
+                  <Button onClick={() => setIsUserDialogOpen(true)}>Add Users</Button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {assignedUsers.map(user => (
+                  <Card key={user.id} className="shadow-sm">
+                    <CardContent className="p-4 flex justify-between items-center">
+                      <div className="flex items-center">
+                        <Avatar className="h-8 w-8 mr-2">
+                          <AvatarFallback>{(user.first_name?.[0] || "") + (user.last_name?.[0] || "")}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-medium">{getUserDisplayName(user)}</div>
+                          <div className="flex gap-2 items-center">
+                            {user.isAdmin ? (
+                              <Badge variant="default" className="text-xs">Admin</Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-xs">Regular</Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveUser(user.id)}
+                        >
+                          <UserMinus className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          
+          {isAdmin && (
+            <TabsContent value="requests" className="mt-6">
+              <div className="py-8 text-center">
+                <p className="text-muted-foreground mb-4">Day-off request management coming soon.</p>
+              </div>
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+      
+      {/* Add users dialog */}
+      <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Users to Work Period</DialogTitle>
+            <DialogDescription>
+              Select users to add to this work period. Users will be able to see the work period and manage their availability.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Input 
+              placeholder="Search users..." 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+              className="mb-4"
+            />
+            
+            <div className="max-h-96 overflow-y-auto">
+              {isLoadingAllUsers ? (
+                <div className="py-4 text-center">Loading users...</div>
+              ) : filteredUsers.length === 0 ? (
+                <div className="py-4 text-center">No users found.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.map(user => {
+                      const isInWorkPeriod = assignedUsers.some(
+                        assignedUser => assignedUser.id === user.id
+                      );
+                      
+                      return (
+                        <TableRow key={user.id}>
+                          <TableCell className="font-medium">{getUserDisplayName(user)}</TableCell>
+                          <TableCell>
+                            {user.isAdmin ? (
+                              <Badge variant="default">Admin</Badge>
+                            ) : (
+                              <Badge variant="secondary">Regular</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isInWorkPeriod ? (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => handleRemoveUser(user.id)}
+                              >
+                                <UserMinus className="h-4 w-4 mr-2" />
+                                Remove
+                              </Button>
+                            ) : (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => handleAddUser(user.id)}
+                              >
+                                <UserPlus className="h-4 w-4 mr-2" />
+                                Add
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button onClick={() => setIsUserDialogOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Layout>
+  );
+};
+
+export default WorkPeriodDetail;
