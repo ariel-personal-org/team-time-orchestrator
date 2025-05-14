@@ -238,18 +238,18 @@ const WorkPeriodDetail = () => {
         />
 
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-6 w-full">
-          <TabsList className="w-full justify-start">
-            <TabsTrigger value="schedule" className="flex-1 text-base py-3">Schedule</TabsTrigger>
-            <TabsTrigger value="users" className="flex-1 text-base py-3">
+          <TabsList className="w-full grid grid-cols-3 p-0 h-12">
+            <TabsTrigger value="schedule" className="text-base py-3 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary">Schedule</TabsTrigger>
+            <TabsTrigger value="users" className="text-base py-3 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
               Users
               <Badge variant="secondary" className="ml-2">{assignedUsers.length}</Badge>
             </TabsTrigger>
             {isAdmin && (
-              <TabsTrigger value="requests" className="flex-1 text-base py-3">Day-Off Requests</TabsTrigger>
+              <TabsTrigger value="requests" className="text-base py-3 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary">Day-Off Requests</TabsTrigger>
             )}
           </TabsList>
           
-          <TabsContent value="schedule" className="mt-6">
+          <TabsContent value="schedule" className="mt-6 border-0 p-0">
             <ScheduleGridComponent
               workPeriodId={id!}
               workPeriod={workPeriod}
@@ -260,7 +260,7 @@ const WorkPeriodDetail = () => {
             />
           </TabsContent>
           
-          <TabsContent value="users" className="mt-6">
+          <TabsContent value="users" className="mt-6 border-0 p-0">
             <UsersList
               workPeriodId={id!}
               assignedUsers={assignedUsers}
@@ -270,7 +270,7 @@ const WorkPeriodDetail = () => {
           </TabsContent>
           
           {isAdmin && (
-            <TabsContent value="requests" className="mt-6">
+            <TabsContent value="requests" className="mt-6 border-0 p-0">
               <div className="py-8 text-center">
                 <p className="text-muted-foreground mb-4">Day-off request management coming soon.</p>
               </div>
