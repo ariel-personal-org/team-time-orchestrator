@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserPlus, UserMinus } from 'lucide-react';
 import { UserProfile } from '@/types/scheduleTypes';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,11 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
+  useEffect(() => {
+    console.log('UserDialogContent received allUsers:', allUsers?.length);
+    console.log('UserDialogContent received assignedUsers:', assignedUsers?.length);
+  }, [allUsers, assignedUsers]);
+
   // Filter users based on search term
   const filteredUsers = allUsers
     ? allUsers.filter(user => 
@@ -34,7 +39,8 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
       )
     : [];
     
-  console.log('Filtered users:', filteredUsers.length);
+  console.log('Filtered users count:', filteredUsers.length);
+  console.log('Filtered user IDs:', filteredUsers.map(u => u.id).join(', '));
 
   return (
     <div className="py-4">

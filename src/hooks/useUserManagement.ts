@@ -10,23 +10,26 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
   const queryClient = useQueryClient();
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
 
-  // Fetch all users for the user management dialog
+  // Fetch all users for the user management dialog with detailed logging
   const { data: allUsers = [], isLoading: isLoadingAllUsers } = useQuery({
     queryKey: ['allUsers'],
     queryFn: async () => {
-      console.log('Fetching all users...');
+      console.log('Fetching all users from profiles table...');
       
-      // Fetch all profiles from the profiles table with better error logging
-      const { data: profiles, error: profilesError } = await supabase
+      // Fetch all profiles with detailed logging
+      const { data: profiles, error: profilesError, count: profilesCount } = await supabase
         .from('profiles')
-        .select('*');
+        .select('*', { count: 'exact' });
       
       if (profilesError) {
         console.error('Error fetching profiles:', profilesError);
         throw profilesError;
       }
 
-      console.log('Fetched profiles:', profiles?.length);
+      console.log(`Fetched ${profilesCount} profiles:`, profiles?.length);
+      
+      // Log actual profiles data (excluding sensitive info)
+      console.log('Profile IDs:', profiles?.map(p => p.id).join(', '));
       
       // Fetch admin status for all users
       const { data: userRoles, error: rolesError } = await supabase
@@ -40,6 +43,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
       }
       
       console.log('Fetched user roles:', userRoles?.length);
+      console.log('Admin user IDs:', userRoles?.map(r => r.user_id).join(', '));
       
       // Add isAdmin flag to each profile
       const profilesWithAdminStatus = (profiles || []).map(profile => ({
@@ -47,16 +51,17 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
         isAdmin: userRoles?.some(role => role.user_id === profile.id && role.role === 'admin') || false
       }));
       
-      console.log('Profiles with admin status:', profilesWithAdminStatus.length);
+      console.log('Processed profiles with admin status:', profilesWithAdminStatus.length);
       return profilesWithAdminStatus;
     },
-    enabled: true
+    enabled: true,
+    refetchOnWindowFocus: false
   });
 
   // Mutation for adding a user to a work period
   const addUserMutation = useMutation({
     mutationFn: async (userId: string) => {
-      // Use the string version of the table name to avoid TypeScript errors
+      console.log(`Adding user ${userId} to work period ${workPeriodId}`);
       const { data, error } = await supabase
         .from('work_period_users')
         .insert([{ work_period_id: workPeriodId, user_id: userId }])
@@ -74,6 +79,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
       refetchAssignedUsers();
     },
     onError: (error) => {
+      console.error('Error allocating user:', error);
       toast({
         title: 'Error allocating user',
         description: error.message,
@@ -85,8 +91,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
   // Mutation for removing a user from a work period
   const removeUserMutation = useMutation({
     mutationFn: async (userId: string) => {
-      // Delete both allocation and shifts for this user in this work period
-      // Use the string version of the table name to avoid TypeScript errors
+      console.log(`Removing user ${userId} from work period ${workPeriodId}`);
       const { error: allocationError } = await supabase
         .from('work_period_users')
         .delete()
@@ -116,6 +121,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
       refetchAssignedUsers();
     },
     onError: (error) => {
+      console.error('Error removing user:', error);
       toast({
         title: 'Error removing user',
         description: error.message,
