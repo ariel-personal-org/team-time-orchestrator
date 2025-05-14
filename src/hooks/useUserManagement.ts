@@ -19,7 +19,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
       // Fetch all profiles from the profiles table
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name');
+        .select('*');
       
       if (profilesError) {
         console.error('Error fetching profiles:', profilesError);
