@@ -1,18 +1,11 @@
 
-import React, { useState } from 'react';
-import { UserPlus, UserMinus } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import React from 'react';
+import { useUserManagement } from '@/hooks/useUserManagement';
 import { UserProfile } from '@/types/scheduleTypes';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table';
-import { getUserDisplayName } from '@/utils/scheduleUtils';
+import UserCard from './UserCard';
+import UserDialogContent from './UserDialogContent';
 
 interface UsersListProps {
   workPeriodId: string;
@@ -21,144 +14,20 @@ interface UsersListProps {
   refetchAssignedUsers: () => void;
 }
 
-const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAdmin, refetchAssignedUsers }) => {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  // Fetch all users for the user management dialog - ensure we're getting ALL users
-  const { data: allUsers = [], isLoading: isLoadingAllUsers } = useQuery({
-    queryKey: ['allUsers'],
-    queryFn: async () => {
-      console.log('Fetching all users...');
-      
-      // Fetch all profiles from the profiles table
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name');
-      
-      if (profilesError) {
-        console.error('Error fetching profiles:', profilesError);
-        throw profilesError;
-      }
-
-      console.log('Fetched profiles:', profiles?.length);
-      
-      // Fetch admin status for all users
-      const { data: userRoles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id, role')
-        .eq('role', 'admin');
-        
-      if (rolesError) {
-        console.error('Error fetching user roles:', rolesError);
-        throw rolesError;
-      }
-      
-      // Add isAdmin flag to each profile
-      const profilesWithAdminStatus = (profiles || []).map(profile => ({
-        ...profile,
-        isAdmin: userRoles?.some(role => role.user_id === profile.id && role.role === 'admin') || false
-      }));
-      
-      console.log('Profiles with admin status:', profilesWithAdminStatus.length);
-      return profilesWithAdminStatus;
-    },
-    // Don't tie the query to isUserDialogOpen - fetch once and cache
-    enabled: true
-  });
-
-  // Mutation for adding a user to a work period
-  const addUserMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      // Use the string version of the table name to avoid TypeScript errors
-      const { data, error } = await supabase
-        .from('work_period_users')
-        .insert([{ work_period_id: workPeriodId, user_id: userId }])
-        .select();
-      
-      if (error) throw error;
-      return data[0];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workPeriodUsers', workPeriodId] });
-      toast({
-        title: 'User allocated',
-        description: 'User has been allocated to the work period.',
-      });
-      refetchAssignedUsers();
-    },
-    onError: (error) => {
-      toast({
-        title: 'Error allocating user',
-        description: error.message,
-        variant: 'destructive'
-      });
-    }
-  });
-
-  // Mutation for removing a user from a work period
-  const removeUserMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      // Delete both allocation and shifts for this user in this work period
-      // Use the string version of the table name to avoid TypeScript errors
-      const { error: allocationError } = await supabase
-        .from('work_period_users')
-        .delete()
-        .eq('work_period_id', workPeriodId)
-        .eq('user_id', userId);
-      
-      if (allocationError) throw allocationError;
-      
-      // Also delete shifts for this user in this work period
-      const { error: shiftsError } = await supabase
-        .from('shifts')
-        .delete()
-        .eq('work_period_id', workPeriodId)
-        .eq('user_id', userId);
-      
-      if (shiftsError) throw shiftsError;
-      
-      return userId;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workPeriodUsers', workPeriodId] });
-      queryClient.invalidateQueries({ queryKey: ['workPeriodShifts', workPeriodId] });
-      toast({
-        title: 'User removed',
-        description: 'User has been removed from the work period.',
-      });
-      refetchAssignedUsers();
-    },
-    onError: (error) => {
-      toast({
-        title: 'Error removing user',
-        description: error.message,
-        variant: 'destructive'
-      });
-    }
-  });
-
-  const handleAddUser = (userId: string) => {
-    addUserMutation.mutate(userId);
-  };
-
-  const handleRemoveUser = (userId: string) => {
-    removeUserMutation.mutate(userId);
-  };
-
-  // Make sure we have data before filtering
-  const filteredUsers = allUsers 
-    ? allUsers.filter(user => 
-        (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        user.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.id.toLowerCase().includes(searchTerm.toLowerCase()))
-      )
-    : [];
-
-  console.log('Filtered users:', filteredUsers.length);
-  console.log('Assigned users:', assignedUsers.length);
+const UsersList: React.FC<UsersListProps> = ({ 
+  workPeriodId, 
+  assignedUsers, 
+  isAdmin, 
+  refetchAssignedUsers 
+}) => {
+  const {
+    allUsers,
+    isLoadingAllUsers,
+    isUserDialogOpen,
+    setIsUserDialogOpen,
+    handleAddUser,
+    handleRemoveUser
+  } = useUserManagement(workPeriodId, refetchAssignedUsers);
 
   return (
     <>
@@ -179,34 +48,12 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {assignedUsers.map(user => (
-            <Card key={user.id} className="shadow-sm">
-              <CardContent className="p-4 flex justify-between items-center">
-                <div className="flex items-center">
-                  <Avatar className="h-8 w-8 mr-2">
-                    <AvatarFallback>{(user.first_name?.[0] || "") + (user.last_name?.[0] || "")}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <div className="font-medium">{getUserDisplayName(user)}</div>
-                    <div className="flex gap-2 items-center">
-                      {user.isAdmin ? (
-                        <Badge variant="default" className="text-xs">Admin</Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-xs">Regular</Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveUser(user.id)}
-                  >
-                    <UserMinus className="h-4 w-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+            <UserCard 
+              key={user.id}
+              user={user}
+              isAdmin={isAdmin}
+              onRemoveUser={handleRemoveUser}
+            />
           ))}
         </div>
       )}
@@ -221,73 +68,13 @@ const UsersList: React.FC<UsersListProps> = ({ workPeriodId, assignedUsers, isAd
             </DialogDescription>
           </DialogHeader>
           
-          <div className="py-4">
-            <Input 
-              placeholder="Search users..." 
-              value={searchTerm} 
-              onChange={(e) => setSearchTerm(e.target.value)} 
-              className="mb-4"
-            />
-            
-            <div className="max-h-96 overflow-y-auto">
-              {isLoadingAllUsers ? (
-                <div className="py-4 text-center">Loading users...</div>
-              ) : filteredUsers.length === 0 ? (
-                <div className="py-4 text-center">No users found.</div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredUsers.map(user => {
-                      const isInWorkPeriod = assignedUsers.some(
-                        assignedUser => assignedUser.id === user.id
-                      );
-                      
-                      return (
-                        <TableRow key={user.id}>
-                          <TableCell className="font-medium">{getUserDisplayName(user)}</TableCell>
-                          <TableCell>
-                            {user.isAdmin ? (
-                              <Badge variant="default">Admin</Badge>
-                            ) : (
-                              <Badge variant="secondary">Regular</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {isInWorkPeriod ? (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                onClick={() => handleRemoveUser(user.id)}
-                              >
-                                <UserMinus className="h-4 w-4 mr-2" />
-                                Remove
-                              </Button>
-                            ) : (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                onClick={() => handleAddUser(user.id)}
-                              >
-                                <UserPlus className="h-4 w-4 mr-2" />
-                                Allocate
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-          </div>
+          <UserDialogContent
+            allUsers={allUsers}
+            assignedUsers={assignedUsers}
+            isLoading={isLoadingAllUsers}
+            onAddUser={handleAddUser}
+            onRemoveUser={handleRemoveUser}
+          />
           
           <DialogFooter>
             <Button onClick={() => setIsUserDialogOpen(false)}>
