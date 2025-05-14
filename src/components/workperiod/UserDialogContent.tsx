@@ -33,6 +33,8 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
         user.id.toLowerCase().includes(searchTerm.toLowerCase()))
       )
     : [];
+    
+  console.log('Filtered users:', filteredUsers.length);
 
   return (
     <div className="py-4">

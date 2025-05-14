@@ -16,7 +16,7 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
     queryFn: async () => {
       console.log('Fetching all users...');
       
-      // Fetch all profiles from the profiles table
+      // Fetch all profiles from the profiles table with better error logging
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('*');
@@ -38,6 +38,8 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
         console.error('Error fetching user roles:', rolesError);
         throw rolesError;
       }
+      
+      console.log('Fetched user roles:', userRoles?.length);
       
       // Add isAdmin flag to each profile
       const profilesWithAdminStatus = (profiles || []).map(profile => ({

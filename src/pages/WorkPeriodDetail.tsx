@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
@@ -236,15 +237,15 @@ const WorkPeriodDetail = () => {
           datesLength={dates.length}
         />
 
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-6">
-          <TabsList>
-            <TabsTrigger value="schedule">Schedule</TabsTrigger>
-            <TabsTrigger value="users">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-6 w-full">
+          <TabsList className="w-full justify-start">
+            <TabsTrigger value="schedule" className="flex-1 text-base py-3">Schedule</TabsTrigger>
+            <TabsTrigger value="users" className="flex-1 text-base py-3">
               Users
               <Badge variant="secondary" className="ml-2">{assignedUsers.length}</Badge>
             </TabsTrigger>
             {isAdmin && (
-              <TabsTrigger value="requests">Day-Off Requests</TabsTrigger>
+              <TabsTrigger value="requests" className="flex-1 text-base py-3">Day-Off Requests</TabsTrigger>
             )}
           </TabsList>
           
