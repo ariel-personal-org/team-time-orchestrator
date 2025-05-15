@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, UserMinus, UserRound } from 'lucide-react';
 import { UserProfile } from '@/types/scheduleTypes';
-import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,7 +24,6 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
   onAddUser,
   onRemoveUser
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const { toast } = useToast();
 
@@ -33,18 +31,6 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
     console.log('UserDialogContent received allUsers:', allUsers?.length);
     console.log('UserDialogContent received assignedUsers:', assignedUsers?.length);
   }, [allUsers, assignedUsers]);
-
-  // Filter users based on search term
-  const filteredUsers = allUsers
-    ? allUsers.filter(user => 
-        (user.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        user.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.id.toLowerCase().includes(searchTerm.toLowerCase()))
-      )
-    : [];
-    
-  console.log('Filtered users count:', filteredUsers.length);
-  console.log('Filtered user IDs:', filteredUsers.map(u => u.id).join(', '));
 
   // Function to create a test user for demonstration
   const createTestUser = async () => {
@@ -54,7 +40,9 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
       // Generate a random ID for the test user
       const testUserId = crypto.randomUUID();
       
-      // Create a profile for the test user
+      // Create a profile for the test user with detailed logging
+      console.log('Creating test user with ID:', testUserId);
+      
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .insert([{
@@ -65,20 +53,27 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
         .select();
       
       if (profileError) {
+        console.error('Profile creation error:', profileError);
         throw profileError;
       }
       
+      console.log('Profile created successfully:', profile);
+      
       // Add regular user role
-      const { error: roleError } = await supabase
+      const { data: roleData, error: roleError } = await supabase
         .from('user_roles')
         .insert([{
           user_id: testUserId,
           role: 'user'
-        }]);
+        }])
+        .select();
       
       if (roleError) {
+        console.error('Role assignment error:', roleError);
         throw roleError;
       }
+      
+      console.log('User role assigned successfully:', roleData);
       
       toast({
         title: 'Test user created',
@@ -103,13 +98,7 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
 
   return (
     <div className="py-4">
-      <div className="flex items-center justify-between mb-4">
-        <Input 
-          placeholder="Search users..." 
-          value={searchTerm} 
-          onChange={(e) => setSearchTerm(e.target.value)} 
-          className="flex-1 mr-2"
-        />
+      <div className="flex items-center justify-end mb-4">
         <Button 
           onClick={createTestUser} 
           disabled={isCreatingUser} 
@@ -124,7 +113,7 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
       <div className="max-h-96 overflow-y-auto">
         {isLoading ? (
           <div className="py-4 text-center">Loading users...</div>
-        ) : filteredUsers.length === 0 ? (
+        ) : allUsers.length === 0 ? (
           <div className="py-4 text-center">No users found.</div>
         ) : (
           <Table>
@@ -136,7 +125,7 @@ const UserDialogContent: React.FC<UserDialogContentProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredUsers.map(user => {
+              {allUsers.map(user => {
                 const isInWorkPeriod = assignedUsers.some(
                   assignedUser => assignedUser.id === user.id
                 );
