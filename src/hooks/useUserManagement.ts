@@ -10,13 +10,13 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
   const queryClient = useQueryClient();
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
 
-  // Fetch all users for the user management dialog with detailed logging
+  // Fetch all users for the user management dialog
   const { data: allUsers = [], isLoading: isLoadingAllUsers } = useQuery({
     queryKey: ['allUsers'],
     queryFn: async () => {
       console.log('Fetching all users from profiles table...');
       
-      // Fetch all profiles with detailed logging
+      // Fetch all profiles
       const { data: profiles, error: profilesError, count: profilesCount } = await supabase
         .from('profiles')
         .select('*', { count: 'exact' });
@@ -27,8 +27,6 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
       }
 
       console.log(`Fetched ${profilesCount} profiles:`, profiles?.length);
-      
-      // Log actual profiles data (excluding sensitive info)
       console.log('Profile IDs:', profiles?.map(p => p.id).join(', '));
       
       // Fetch admin status for all users
