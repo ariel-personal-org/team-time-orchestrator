@@ -8,7 +8,6 @@ import { useToast } from '@/components/ui/use-toast';
 export function useUserManagement(workPeriodId: string, refetchAssignedUsers: () => void) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
 
   // Fetch all users for the user management dialog
   const { data: allUsers = [], isLoading: isLoadingAllUsers } = useQuery({
@@ -139,8 +138,6 @@ export function useUserManagement(workPeriodId: string, refetchAssignedUsers: ()
   return {
     allUsers,
     isLoadingAllUsers,
-    isUserDialogOpen,
-    setIsUserDialogOpen,
     handleAddUser,
     handleRemoveUser
   };
